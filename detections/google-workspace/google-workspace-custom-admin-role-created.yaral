@@ -1,0 +1,50 @@
+rule google_workspace_custom_admin_role_created {
+
+    meta:
+        author = "Sakil Khan"
+        description = "Detects when a custom admin role is created in Google Workspace. An adversary may create a custom admin role in order to elevate the permissions of other user accounts and persist in the target environment."
+        mitre_attack_tactic = "Persistence"
+        mitre_attack_technique = "Account manipulation"
+        mitre_attack_url = "https://attack.mitre.org/techniques/T1098/"
+        type = "Alert"
+        data_source = "Google Workspace"
+        severity = "Medium"
+    events:
+        $admin.metadata.vendor_name = "Google Workspace"
+        $admin.metadata.product_event_type = "CREATE_ROLE"
+        $admin.principal.user.userid = $userid
+        $admin.metadata.event_timestamp.seconds = $timestamp
+
+    outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+        $mitre_attack_tactic = "Persistence"
+        $mitre_attack_technique = "Account manipulation"
+        $mitre_attack_url = "https://attack.mitre.org/techniques/T1098/"
+        // Contextual enrichment for alert triage
+
+        $principal_user_email_addresses = array_distinct ($admin.principal.user.email_addresses)
+        $principal_user_userid = array_distinct ($admin.principal.user.userid)
+        $principal_ip = array_distinct($admin.principal.ip)
+        $principal_ip_country = array_distinct($admin.principal.ip_geo_artifact.location.country_or_region)
+        $security_result_description = array_distinct($admin.security_result.description)
+        $security_result_summary = array_distinct($admin.security_result.summary)
+        $metadata_product_event_type= array_distinct($admin.metadata.product_event_type)
+        $metadata_event_type= array_distinct($admin.metadata.event_type)
+        $metadata_url= array_distinct($admin.metadata.url_back_to_product)
+        $addtional_fields_event_name = array_distinct($admin.additional.fields["event_name_0"])
+        $addtional_fields_event_type = array_distinct($admin.additional.fields["event_type_0"])
+        $addtional_fields_privilege_name = array_distinct($admin.additional.fields["privilege_name_0_2"])
+        $target_resource_resource_type = array_distinct($admin.target.resource.resource_type)
+        $target_user_attribute_roles_name = array_distinct($admin.target.user.attribute.roles.name)
+        $target_application = array_distinct($admin.target.application)
+        $security_result_action = array_distinct($admin.security_result.action)
+
+    condition:
+        $admin
+}

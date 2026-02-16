@@ -1,0 +1,43 @@
+rule google_workspace_external_user_added_to_group {
+
+    meta:
+        author = "Sakil Khan"
+        description = "Detects an external Google Workspace user account being added to an existing group. Adversaries may add external user accounts as a means to intercept shared files or emails with that specific group."
+        mitre_attack_tactic = "Initial Access"
+        mitre_attack_technique = "Valid Accounts"
+        mitre_attack_url = "https://attack.mitre.org/techniques/T1078/"
+        type = "Alert"
+        data_source = "Google Workspace"
+        severity = "Medium"
+    events:
+        $external.metadata.vendor_name = "Google Workspace"
+        $external.metadata.event_timestamp.seconds = $timestamp
+        $external.metadata.product_event_type = "ADD_GROUP_MEMBER"
+        $external.principal.user.userid = $userid
+        $external.target.group.email_addresses != /@yourdomain\.com$/
+        $external.target.user.email_addresses != /@yourdomain\.com$/
+        $external.target.user.userid != /@yourdomain\.com$/
+
+    outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+        // Contextual enrichment for alert triage
+
+        $principal_user_email_addresses = array_distinct ($external.principal.user.email_addresses)
+        $mitre_attack_tactic = "Initial Access"
+        $mitre_attack_technique = "Valid Accounts"
+        $mitre_attack_url = "https://attack.mitre.org/techniques/T1078/"
+        $principal_ip = array_distinct($external.principal.ip)
+        $principal_ip_country = array_distinct($external.principal.ip_geo_artifact.location.country_or_region)
+        $principal_ip_state = array_distinct($external.principal.ip_geo_artifact.location.state)
+        $principal_ip_city = array_distinct($external.principal.location.city)
+        $principal_display_name = array_distinct($external.principal.user.user_display_name)
+
+    condition:
+        $external
+}

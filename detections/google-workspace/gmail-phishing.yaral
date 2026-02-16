@@ -1,0 +1,45 @@
+rule gmail_phishing {
+
+  meta:
+    author = "Community"
+    description = "Detects when a user reports a phishing email in Gmail. User-reported phishing provides a high-fidelity signal for identifying active email-based attacks targeting your organisation."
+    mitre_attack_tactic = "Initial Access"
+    mitre_attack_technique = "Phishing"
+    mitre_attack_url = "https://attack.mitre.org/techniques/T1566/"
+    type = "Alert"
+    data_source = "Gmail logs and Google Workspace alerts"
+    severity = "Medium"
+
+  events:
+    // Match user-reported phishing events from Gmail
+    $phishing.extracted.fields["type"] = "User reported phishing"
+    $phishing.network.email.to = $recipient
+    $phishing.network.email.from = $sender
+
+  match:
+    // Group by recipient and sender to consolidate reports of the same phishing email
+    $recipient, $sender over 1h
+
+  outcome:
+    // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+    $risk_score = max(
+        40 +
+        if (01 = timestamp.get_day_of_week($phishing.metadata.event_timestamp.seconds, "UTC"), 15) + // Sunday
+        if (07 = timestamp.get_day_of_week($phishing.metadata.event_timestamp.seconds, "UTC"), 15) + // Saturday
+        if ((timestamp.get_hour($phishing.metadata.event_timestamp.seconds, "UTC") >= 0 and timestamp.get_hour($phishing.metadata.event_timestamp.seconds, "UTC") <= 8) or timestamp.get_hour($phishing.metadata.event_timestamp.seconds, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+    )
+
+    // Contextual enrichment for alert triage
+    $email_from = array_distinct($phishing.network.email.from)
+    $user_id = array_distinct($phishing.principal.user.userid)
+    $attachments = array_distinct($phishing.about.file.sha256)
+    $email_message = array_distinct($phishing.security_result.detection_fields.value)
+    $receivers = array_distinct($phishing.extracted.fields["data.messages[0].recipient"])
+    $email_subject = array_distinct($phishing.network.email.subject[0])
+    $security_summary = array_distinct($phishing.security_result[0].summary)
+    $security_severity = array_distinct($phishing.security_result[0].severity)
+    $user_display_name = array_distinct($phishing.principal.user.user_display_name)
+
+  condition:
+    $phishing
+}

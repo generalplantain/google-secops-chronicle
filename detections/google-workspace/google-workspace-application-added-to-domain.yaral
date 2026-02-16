@@ -1,0 +1,38 @@
+rule google_workspace_application_added_to_domain {
+
+    meta:
+        author = "Sakil Khan"
+        description = "Detects when a Google marketplace application is added to the Google Workspace domain. An adversary may add a malicious application to an organization's Google Workspace domain in order to maintain a presence in their target's organization and steal data."
+        mitre_attack_tactic = "Persistence"
+        mitre_attack_technique = "Account manipulation"
+        mitre_attack_url = "https://attack.mitre.org/techniques/T1098/"
+        type = "Alert"
+        data_source = "Google Workspace"
+        severity = "Medium"
+
+    events:
+        $application.metadata.log_type = "WORKSPACE_ACTIVITY"
+        $application.metadata.product_event_type = "ADD_APPLICATION" // Fires when a new application is installed domain-wide
+        $application.metadata.event_timestamp.seconds = $timestamp // Bind timestamp for risk scoring
+        $application.principal.user.email_addresses = $userid // Bind the admin's email for match grouping
+
+    match:
+        $userid over 1h // Group multiple app installs by the same admin within a 1-hour window
+
+    outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+        // Contextual enrichment for alert triage
+        $principal_ip = array_distinct($application.principal.ip)
+        $principal_ip_country = array_distinct($application.principal.ip_geo_artifact.location.country_or_region)
+        $principal_state = array_distinct($application.principal.location.state)
+        $target_application = array_distinct($application.target.application)
+
+    condition:
+        $application
+}

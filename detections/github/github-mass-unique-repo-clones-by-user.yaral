@@ -1,0 +1,57 @@
+rule github_mass_unique_repo_clones_by_user
+{
+  meta:
+    author = "Sakil Khan"
+    description = "Detects when a user clones 25+ unique repositories within 30 minutes, potentially indicating data exfiltration or unauthorized repository access"
+    mitre_attack_tactic = "Collection"
+    mitre_attack_technique = "Data from Information Repositories"
+    mitre_attack_url = "https://attack.mitre.org/techniques/T1213/"
+    type = "Alert"
+    data_source = "GITHUB"
+    severity = "High"
+
+  events:
+    // Match git clone events from GitHub audit logs
+    $clone.metadata.log_type = "GITHUB"
+    $clone.metadata.product_event_type = "git.clone"
+
+    // Extract username and repo name
+    $clone.additional.fields["Source_User"] = $username
+    $clone.target.resource.name = $repo
+
+    // Excluding bot accounts
+    not re.regex($username, `(?i)(bot|machine|key)`) nocase
+
+  match:
+    // Group by username ONLY - aggregate all their clone activity
+    $username over 5m
+
+  outcome:
+    // Risk scoring — High severity, static score (no timestamp binding available in match)
+    $risk_score = max(55)
+
+    // Count unique repositories cloned (primary detection metric)
+    $unique_repo_count = count_distinct($repo)
+
+    // Total clone operations (will be higher if they clone same repo multiple times)
+    $total_clone_count = count($clone.metadata.id)
+
+    // Which orgs were targeted
+    $github_orgs = array_distinct($clone.additional.fields["github.org"])
+
+    // List of all repos cloned
+    $repos_cloned = array_distinct($repo)
+
+    // Were they public or private repos
+    $repository_public = array_distinct($clone.additional.fields["github.repository_public"])
+
+    // Authentication tokens used
+    $token_ids = array_distinct($clone.additional.fields["github.token_id"])
+
+    // User agents (helps identify tooling vs manual clones)
+    $user_agents = array_distinct($clone.additional.fields["github.user_agent"])
+
+  condition:
+    // Alert when user clones 25 or more UNIQUE repositories
+    $clone and $unique_repo_count >= 10
+}

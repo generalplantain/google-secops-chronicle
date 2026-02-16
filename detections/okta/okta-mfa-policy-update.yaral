@@ -1,0 +1,55 @@
+rule okta_mfa_policy_update {
+
+    meta:
+        author = "Sakil Khan"
+        description = "Detects updates to multi-factor authentication policies, which could indicate an attempt to weaken security settings."
+        mitre_attack_tactic = "Persistence"
+        mitre_attack_technique = "Account Manipulation"
+        mitre_attack_url = "https://attack.mitre.org/techniques/T1098/"
+        type = "Alert"
+        data_source = "Okta"
+        severity = "Medium"
+    events:
+        $mfa.metadata.vendor_name = "Okta"
+        $mfa.principal.user.userid = $userid
+
+        (
+        $mfa.metadata.product_event_type = "policy.lifecycle.update" or
+        $mfa.metadata.product_event_type = "policy.rule.update"
+        )
+
+        (
+        $mfa.extracted.fields["target{}.detailEntry.policyType"] = "OktaMfaEnroll" or
+        $mfa.extracted.fields["target{}.detailEntry.policyType"] = "Okta:SignOn"
+        )
+
+        $mfa.metadata.event_timestamp.seconds = $timestamp
+
+    outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+        $principal_user_email_addresses = array_distinct ($mfa.principal.user.email_addresses)
+        $mitre_attack_tactic = "Persistence"
+        $mitre_attack_technique = "Account Manipulation"
+        $mitre_attack_url = "https://attack.mitre.org/techniques/T1098/"
+        $target_user_agent = array_distinct($mfa.network.http.user_agent)
+        $client_user_agent_browser = array_distinct($mfa.extracted.fields["client.userAgent.browser"])
+        $client_user_agent_os = array_distinct($mfa.extracted.fields["client.userAgent.os"])
+        $principal_ip = array_distinct($mfa.principal.ip)
+        $principal_ip_country = array_distinct($mfa.principal.ip_geo_artifact.location.country_or_region)
+        $principal_ip_state = array_distinct($mfa.principal.ip_geo_artifact.location.state)
+        $principal_ip_city = array_distinct($mfa.principal.location.city)
+        $security_result_description = array_distinct($mfa.security_result.description)
+        $security_result_summary = array_distinct($mfa.security_result.summary)
+        $debug_context_data_behaviours = array_distinct($mfa.extracted.fields["debugContext.debugData.behaviors"])
+        $outcome_result = array_distinct($mfa.extracted.fields["outcome.result"])
+        $mfa_type = array_distinct($mfa.extracted.fields["target{}.detailEntry.policyType"])
+
+    condition:
+        $mfa
+}

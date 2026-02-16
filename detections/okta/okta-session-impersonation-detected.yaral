@@ -1,0 +1,45 @@
+rule okta_session_impersonation_detected {
+
+    meta:
+        author = "Sakil Khan"
+        description = "Detects session impersonation attempts, suggesting an attacker is using a valid session token to act as another user."
+        mitre_attack_tactic = "Credential Access"
+        mitre_attack_technique = "Valid Accounts"
+        type = "Alert"
+        data_source = "Okta"
+        severity = "High"
+        false_positives = "This rule may cause false positives if Okta support are working in our tenants for legitimate use cases."
+    events:
+        $impersonation.metadata.vendor_name = "Okta"
+        $impersonation.metadata.product_event_type = /user\.session\.impersonation\..*/
+        $impersonation.metadata.event_timestamp.seconds = $timestamp
+        $impersonation.principal.user.userid = $userid
+        $impersonation.extracted.fields["outcome.result"]="SUCCESS"
+
+    match:
+        $userid over 1h
+
+    outcome:
+        // Risk scoring — base: 55 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            55 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+        $principal_user_email_addresses = array_distinct ($impersonation.principal.user.email_addresses)
+        $target_user_agent = array_distinct($impersonation.network.http.user_agent)
+        $client_user_agent_browser = array_distinct($impersonation.extracted.fields["client.userAgent.browser"])
+        $client_user_agent_os = array_distinct($impersonation.extracted.fields["client.userAgent.os"])
+        $principal_ip = array_distinct($impersonation.principal.ip)
+        $principal_ip_country = array_distinct($impersonation.principal.ip_geo_artifact.location.country_or_region)
+        $principal_ip_state = array_distinct($impersonation.principal.ip_geo_artifact.location.state)
+        $principal_ip_city = array_distinct($impersonation.principal.location.city)
+        $security_result_description = array_distinct($impersonation.security_result.description)
+        $security_result_summary = array_distinct($impersonation.security_result.summary)
+        $debug_context_data_behaviours = array_distinct($impersonation.extracted.fields["debugContext.debugData.behaviors"])
+        $outcome_result = array_distinct($impersonation.extracted.fields["outcome.result"])
+
+    condition:
+        $impersonation
+}

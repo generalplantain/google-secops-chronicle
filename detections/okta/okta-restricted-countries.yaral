@@ -1,0 +1,58 @@
+rule okta_restricted_countries {
+
+  meta:
+    author = "Community"
+    description = "Detects when a user logs in from a restricted country. Customise the country list to match your organisation's sanctioned or high-risk regions."
+    type = "Alert"
+    data_source = "Okta"
+    severity = "Medium"
+    mitre_attack_tactic = "Initial Access"
+    mitre_attack_technique = "Valid Accounts"
+  events:
+    $ctry.extracted.fields["outcome.result"] = "SUCCESS"
+    ($ctry.metadata.event_type = "USER_LOGIN" or $ctry.metadata.product_event_type="user.authentication.sso")
+    ($ctry.principal.location.country_or_region = "Afghanistan" or
+    $ctry.principal.location.country_or_region = "Belarus" or
+    $ctry.principal.location.country_or_region = "Central African Republic" or
+    $ctry.principal.location.country_or_region = "China" or
+    $ctry.principal.location.country_or_region = "Côte d'Ivoire" or
+    $ctry.principal.location.country_or_region = "Crimea" or
+    $ctry.principal.location.country_or_region = "Cuba" or
+    $ctry.principal.location.country_or_region = "Eritrea" or
+    $ctry.principal.location.country_or_region = "Democratic Republic of Congo" or
+    $ctry.principal.location.country_or_region = "Haiti" or
+    $ctry.principal.location.country_or_region = "Iran" or
+    $ctry.principal.location.country_or_region = "Iraq" or
+    $ctry.principal.location.country_or_region = "Liberia" or
+    $ctry.principal.location.country_or_region = "Libya" or
+    $ctry.principal.location.country_or_region = "Mali" or
+    $ctry.principal.location.country_or_region = "Myanmar" or
+    $ctry.principal.location.country_or_region = "Nicaragua" or
+    $ctry.principal.location.country_or_region = "North Korea" or
+    $ctry.principal.location.country_or_region = "Russia" or
+    $ctry.principal.location.country_or_region = "Somalia" or
+    $ctry.principal.location.country_or_region = "South Sudan" or
+    $ctry.principal.location.country_or_region = "Sudan" or
+    $ctry.principal.location.country_or_region = "Ukraine" or
+    $ctry.principal.location.country_or_region = "Venezuela" or
+    $ctry.principal.location.country_or_region = "Yemen" or
+    $ctry.principal.location.country_or_region = "Zimbabwe")
+
+  outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+    $principal_ip = array_distinct($ctry.principal.ip)
+    $principal_ip_country = array_distinct($ctry.principal.ip_geo_artifact.location.country_or_region)
+    $principal_ip_city = array_distinct($ctry.principal.location.city)
+    // Contextual enrichment for alert triage
+
+    $principal_user_email_addresses = array_distinct ($ctry.principal.user.email_addresses)
+
+  condition:
+    $ctry
+}

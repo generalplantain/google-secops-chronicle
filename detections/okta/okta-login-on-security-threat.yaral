@@ -1,0 +1,32 @@
+rule okta_login_on_security_threat {
+
+  meta:
+    author = "Community"
+    description = "Detects when a security threat event has a successful login"
+    type = "Alert"
+    data_source = "Okta"
+    severity = "Medium"
+    mitre_attack_tactic = "Defense Evasion, Persistence, Privilege Escalation, Initial Access"
+    mitre_attack_technique = "Valid Accounts"
+  events:
+    $e.metadata.product_event_type = "security.threat.detected"
+    $e.security_result.action != "BLOCK"
+
+  outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+    $principal_user_email_addresses = array_distinct ($e.principal.user.email_addresses)
+    $principal_ip_country = array_distinct($e.principal.ip_geo_artifact.location.country_or_region)
+    $principal_ip_state = array_distinct($e.principal.ip_geo_artifact.location.state)
+    $principal_ip_city = array_distinct($e.principal.location.city)
+    $security_result_description = array_distinct($e.security_result.description)
+    $debug_context_data_behaviours = array_distinct($e.extracted.fields["debugContext.debugData.behaviors"])
+
+  condition:
+    $e
+}

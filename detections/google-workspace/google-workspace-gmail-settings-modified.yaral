@@ -1,0 +1,58 @@
+rule google_workspace_gmail_settings_modified {
+
+    meta:
+        author = "Sakil Khan"
+        description = "Detects when a Gmail setting is added or modified in Google Workspace. Adversaries can add a custom e-mail route for outbound mail to route these e-mails to their own inbox of choice for data gathering. This allows adversaries to capture sensitive information from e-mail and potential attachments, such as invoices or payment documents. By default, all email from current Google Workspace users with accounts are routed through a domain's mail server for inbound and outbound mail"
+        mitre_attack_tactic = "Collection"
+        mitre_attack_technique = "Email Collection"
+        mitre_attack_url = "https://attack.mitre.org/techniques/T1114/"
+        type = "Alert"
+        data_source = "Google Workspace"
+        severity = "Medium"
+        false_positives = "This rule may cause false positives if settings are created/updated for legitimate use cases."
+    events:
+        $gmail.metadata.vendor_name = "Google Workspace"
+
+        (
+        $gmail.metadata.product_event_type = "CREATE_GMAIL_SETTING" or
+        $gmail.metadata.product_event_type = "CHANGE_EMAIL_SETTING" or
+        $gmail.metadata.product_event_type = "CHANGE_GMAIL_SETTING" or
+        $gmail.metadata.product_event_type = "DELETE_GMAIL_SETTING"
+        )
+
+        $gmail.metadata.event_timestamp.seconds = $timestamp
+        $gmail.principal.user.userid = $userid
+
+    outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+        // Contextual enrichment for alert triage
+
+        $principal_user_email_addresses = array_distinct ($gmail.principal.user.email_addresses)
+        $principal_user_userid = array_distinct ($gmail.principal.user.userid)
+
+        $mitre_attack_tactic = "Persistence"
+        $mitre_attack_technique = "Account manipulation"
+        $mitre_attack_url = "https://attack.mitre.org/techniques/T1098/"
+        $principal_ip = array_distinct($gmail.principal.ip)
+        $principal_ip_country = array_distinct($gmail.principal.ip_geo_artifact.location.country_or_region)
+        $security_result_description = array_distinct($gmail.security_result.description)
+        $security_result_summary = array_distinct($gmail.security_result.summary)
+        $metadata_product_event_type= array_distinct($gmail.metadata.product_event_type)
+        $metadata_event_type= array_distinct($gmail.metadata.event_type)
+        $metadata_url= array_distinct($gmail.metadata.url_back_to_product)
+        $target_resource_name = array_distinct($gmail.target.resource.name)
+        $target_resource_resource_type = array_distinct($gmail.target.resource.resource_type)
+        $target_resource_attribute_labels_key = array_distinct($gmail.target.resource.attribute.labels.key)
+        $target_resource_attribute_labels_value = array_distinct($gmail.target.resource.attribute.labels.value)
+        $target_application = array_distinct($gmail.target.application)
+        $security_result_action = array_distinct($gmail.security_result.action)
+
+    condition:
+        $gmail
+}

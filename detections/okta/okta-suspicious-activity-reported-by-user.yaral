@@ -1,0 +1,44 @@
+rule okta_suspicious_activity_reported_by_user {
+
+    meta:
+        author = "Sakil Khan"
+        description = "Detects when a user reports suspicious activity, indicating potential unauthorized access or other security incidents."
+        mitre_attack_tactic = "Reconnaissance"
+        mitre_attack_technique = "Phishing for Information"
+        mitre_attack_url = "https://attack.mitre.org/techniques/T1598/"
+        type = "Alert"
+        data_source = "Okta"
+        severity = "Medium"
+    events:
+        $report.metadata.vendor_name = "Okta"
+        $report.metadata.product_event_type = "user.account.report_suspicious_activity_by_enduser"
+        $report.metadata.event_timestamp.seconds = $timestamp
+        $report.principal.user.userid = $userid
+
+    outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+        $principal_user_email_addresses = array_distinct ($report.principal.user.email_addresses)
+        $mitre_attack_tactic = "Reconnaissance"
+        $mitre_attack_technique = "Phishing for Information"
+        $mitre_attack_url = "https://attack.mitre.org/techniques/T1598/"
+        $target_user_agent = array_distinct($report.network.http.user_agent)
+        $client_user_agent_browser = array_distinct($report.extracted.fields["client.userAgent.browser"])
+        $client_user_agent_os = array_distinct($report.extracted.fields["client.userAgent.os"])
+        $principal_ip = array_distinct($report.principal.ip)
+        $principal_ip_country = array_distinct($report.principal.ip_geo_artifact.location.country_or_region)
+        $principal_ip_state = array_distinct($report.principal.ip_geo_artifact.location.state)
+        $principal_ip_city = array_distinct($report.principal.location.city)
+        $security_result_description = array_distinct($report.security_result.description)
+        $security_result_summary = array_distinct($report.security_result.summary)
+        $debug_context_data_behaviours = array_distinct($report.extracted.fields["debugContext.debugData.behaviors"])
+        $outcome_result = array_distinct($report.extracted.fields["outcome.result"])
+
+    condition:
+        $report
+}

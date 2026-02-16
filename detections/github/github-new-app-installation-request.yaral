@@ -1,0 +1,45 @@
+rule github_new_app_installation_request {
+
+    meta:
+        author = "Sakil Khan"
+        description = "Detects when someone installs a GitHub App in the organization"
+        mitre_attack_tactic = "Execution"
+        mitre_attack_technique = "Software Deployment Tools"
+        mitre_attack_url = "https://attack.mitre.org/techniques/T1072/"
+        type = "Alert"
+        data_source = "GITHUB"
+        severity = "Medium"
+    events:
+        // Looking for GitHub App installation events
+        $ghapp.metadata.log_type = "GITHUB"
+        $ghapp.metadata.event_timestamp.seconds = $timestamp
+        $ghapp.metadata.product_event_type = "integration_installation.create"
+        $ghapp.principal.user.email_addresses = $userid
+
+    match:
+        // Groups by who installed the app - fires once per hour per user
+        $userid over 1h
+
+    outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+                or timestamp.get_hour($timestamp,"UTC") > 18, 20)
+        )
+
+        // What app was installed
+        $integration = array_distinct($ghapp.additional.fields["name"])
+
+        // Which GitHub org it was installed into
+        $repo_org = array_distinct($ghapp.additional.fields["business"])
+
+        // Location of the user who installed the app
+        $country = array_distinct($ghapp.principal.location.country_or_region)
+
+    condition:
+        $ghapp
+}

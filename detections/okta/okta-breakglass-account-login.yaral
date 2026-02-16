@@ -1,0 +1,55 @@
+rule okta_breakglass_account_login {
+
+  meta:
+    author = "Sakil Khan"
+    description = "Detects logins to a breakglass (emergency access) account in Okta. Breakglass accounts bypass normal authentication controls and their use should always be investigated."
+    false_positives = "This rule may cause false positives for legitimate breakglass account usage."
+    data_source = "Okta"
+    mitre_attack_tactic = "Defense Evasion, Persistence, Privilege Escalation, Initial Access"
+    mitre_attack_technique = "Valid Accounts"
+    severity = "Critical"
+  events:
+    $login.metadata.vendor_name = "Okta"
+
+    // Match the breakglass account by checking both principal and target email fields,
+    // since the account may appear in either depending on the authentication flow
+    $login.principal.user.email_addresses = "breakglass-account@example.com" or $login.target.user.email_addresses = "breakglass-account@example.com"
+
+    // Cross-check the actor's alternateId to ensure the breakglass identity is confirmed
+    $login.extracted.fields["actor.alternateId"] = "breakglass-account@example.com"
+
+    // Only consider successful authentication events
+    $login.extracted.fields["outcome.result"] = "SUCCESS"
+
+    // Match both standard Okta login events and SSO-based authentication
+    $login.metadata.event_type = "USER_LOGIN" or $login.metadata.product_event_type = "user.authentication.sso"
+
+    // Bind the source IP for grouping in the match section
+    $login.principal.ip = $source_ip
+
+  match:
+    // Group breakglass login events by source IP over a 1-hour window.
+    // This correlates multiple logins from the same origin so analysts
+    // can see the full scope of breakglass activity in a single alert.
+    $source_ip over 1h
+
+  outcome:
+        // Breakglass accounts are inherently high-risk — always score at maximum
+        $risk_score = max(100)
+
+    // --- Contextual enrichment fields for alert triage ---
+    // Event metadata
+    $event_count = count_distinct($login.metadata.event_type)
+    $event_type = array_distinct($login.extracted.fields["eventType"])
+    $published = array_distinct($login.extracted.fields["published"])
+    $security_result_description = array_distinct($login.security_result.description)
+
+    // Client / network details
+    $client_ip_address = array_distinct($login.extracted.fields["client.ipAddress"])
+    $client_user_agent_browser = array_distinct($login.extracted.fields["client.userAgent.browser"])
+    $client_user_agent_os = array_distinct($login.extracted.fields["client.userAgent.os"])
+
+  condition:
+    // Fire when at least one qualifying breakglass login is observed in the match window
+    $login
+}

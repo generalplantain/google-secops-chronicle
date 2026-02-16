@@ -1,0 +1,53 @@
+rule okta_policy_rule_deleted {
+
+  meta:
+    author = "Sakil Khan"
+    description = "Detects attempts to delete an Okta policy. An adversary may attempt to delete an Okta policy in order to weaken an organization's security controls. For example, an adversary may delete an Okta MFA policy in order to weaken the authentication requirements for user accounts."
+    mitre_attack_tactic = "Defense Evasion"
+    mitre_attack_technique = "Impair Defenses"
+    type = "Alert"
+    data_source = "Okta"
+    severity = "Medium"
+
+  events:
+    $policy.metadata.vendor_name = "Okta"
+
+    // "policy.lifecycle.delete" covers deletion of any Okta policy type (MFA, sign-on, password, etc.)
+    $policy.metadata.product_event_type = "policy.lifecycle.delete"
+    // Bind timestamp and actor for match correlation and risk scoring
+    $policy.metadata.event_timestamp.seconds = $timestamp
+    $policy.extracted.fields["actor.alternateId"] = $userid
+
+    $policy.extracted.fields["outcome.result"] = "SUCCESS"
+
+  match:
+    // Correlate by the actor who deleted the policy over a 1-hour window;
+    // catches one admin deleting multiple policies in quick succession
+    $userid over 1h
+
+  outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+    // --- Contextual enrichment for triage ---
+    $client_user_agent_browser = array_distinct($policy.extracted.fields["client.userAgent.browser"])
+    $client_user_agent_os = array_distinct($policy.extracted.fields["client.userAgent.os"])
+    $principal_ip = array_distinct($policy.principal.ip)
+    $principal_ip_country = array_distinct($policy.principal.ip_geo_artifact.location.country_or_region)
+    $principal_ip_city = array_distinct($policy.principal.location.city)
+    $security_result_description = array_distinct($policy.security_result.description)
+    $security_result_summary = array_distinct($policy.security_result.summary)
+
+    // Okta behavioral signals (e.g. "New Device", "New IP", "Velocity")
+    $debug_context_data_behaviours = array_distinct($policy.extracted.fields["debugContext.debugData.behaviors"])
+
+    // Shows which policy was deleted
+    $resource_ancestor = array_distinct($policy.target.resource_ancestors.name)
+
+  condition:
+    $policy
+}

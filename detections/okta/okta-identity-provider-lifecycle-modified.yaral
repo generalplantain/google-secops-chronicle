@@ -1,0 +1,45 @@
+rule okta_identity_provider_lifecycle_modified {
+
+    meta:
+        author = "Sakil Khan"
+        description = "Detects modifications, creations or deletions to the identity provider configuration, indicating potential attempts to manipulate authentication settings."
+        mitre_attack_tactic = "Persistence"
+        mitre_attack_technique = "Account Manipulation"
+        mitre_attack_url = "https://attack.mitre.org/techniques/T1098/"
+        type = "Alert"
+        data_source = "Okta"
+        severity = "Medium"
+    events:
+        $idp.metadata.vendor_name = "Okta"
+        $idp.metadata.product_event_type = /system\.idp\.lifecycle\..*/
+
+        $idp.metadata.event_timestamp.seconds = $timestamp
+        $idp.principal.user.userid = $userid
+
+    outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+        $principal_user_email_addresses = array_distinct ($idp.principal.user.email_addresses)
+        $mitre_attack_tactic = "Persistence"
+        $mitre_attack_technique = "Account Manipulation"
+        $mitre_attack_url = "https://attack.mitre.org/techniques/T1098/"
+        $target_user_agent = array_distinct($idp.network.http.user_agent)
+        $client_user_agent_browser = array_distinct($idp.extracted.fields["client.userAgent.browser"])
+        $client_user_agent_os = array_distinct($idp.extracted.fields["client.userAgent.os"])
+        $principal_ip = array_distinct($idp.principal.ip)
+        $principal_ip_country = array_distinct($idp.principal.ip_geo_artifact.location.country_or_region)
+        $principal_ip_state = array_distinct($idp.principal.ip_geo_artifact.location.state)
+        $principal_ip_city = array_distinct($idp.principal.location.city)
+        $security_result_description = array_distinct($idp.security_result.description)
+        $security_result_summary = array_distinct($idp.security_result.summary)
+        $debug_context_data_behaviours = array_distinct($idp.extracted.fields["debugContext.debugData.behaviors"])
+        $outcome_result = array_distinct($idp.extracted.fields["outcome.result"])
+
+    condition:
+        $idp
+}

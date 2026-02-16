@@ -1,0 +1,35 @@
+rule gmail_quarantined_by_rule {
+
+  meta:
+    author = "Community"
+    description = "Detects when a custom Gmail content compliance or routing rule quarantines an email. Check the Google Admin quarantine for details. This alert triggers at most once per day, but multiple emails may have been quarantined."
+    severity = "Low"
+    mitre_attack_tactic = "Initial Access"
+    mitre_attack_technique = "Phishing"
+    mitre_attack_url = "https://attack.mitre.org/techniques/T1566/"
+    type = "Alert"
+    data_source = "GMAIL"
+
+  events:
+    // Match quarantine actions from Google Workspace activity logs
+    $e.metadata.log_type = "WORKSPACE_ACTIVITY"
+    $e.metadata.product_event_type = "action_complete"
+    $e.security_result.action_details = "action_type : GMAIL_QUARANTINE_MESSAGE"
+
+  outcome:
+    // Risk scoring — base: 20 | weekend: +15 | off-hours: +15
+    $risk_score = max(
+        20 +
+        if (01 = timestamp.get_day_of_week($e.metadata.event_timestamp.seconds, "UTC"), 15) + // Sunday
+        if (07 = timestamp.get_day_of_week($e.metadata.event_timestamp.seconds, "UTC"), 15) + // Saturday
+        if ((timestamp.get_hour($e.metadata.event_timestamp.seconds, "UTC") >= 0 and timestamp.get_hour($e.metadata.event_timestamp.seconds, "UTC") <= 8) or timestamp.get_hour($e.metadata.event_timestamp.seconds, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+    )
+
+    // Contextual enrichment for alert triage
+    $email_subject = $e.additional.fields["resource_title"]
+    $to_email = array_distinct($e.network.email.to)
+    $gmail_rule_name = array_distinct($e.security_result.rule_name)
+
+  condition:
+    $e
+}

@@ -1,0 +1,47 @@
+rule google_workspace_admin_role_assigned_to_user {
+
+    meta:
+        author = "Sakil Khan"
+        description = "Assigning the administrative role to a user will grant them access to the Google Admin console and grant them administrator privileges which allow them to access and manage various resources and applications. An adversary may create a new administrator account for persistence or apply the admin role to an existing user to carry out further intrusion efforts. Users with super-admin privileges can bypass single-sign on if enabled in Google Workspace."
+        mitre_attack_tactic = "Persistence"
+        mitre_attack_technique = "Account manipulation"
+        mitre_attack_url = "https://attack.mitre.org/techniques/T1098/"
+        type = "Alert"
+        data_source = "Google Workspace"
+        severity = "Medium"
+    events:
+        $admin.metadata.vendor_name = "Google Workspace"
+        $admin.metadata.product_event_type = "ASSIGN_ROLE"
+        $admin.metadata.event_timestamp.seconds = $timestamp
+        $admin.principal.user.userid = $userid
+
+    outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+        // Contextual enrichment for alert triage
+
+        $principal_user_email_addresses = array_distinct ($admin.principal.user.email_addresses)
+        $mitre_attack_tactic = "Persistence"
+        $mitre_attack_technique = "Account manipulation"
+        $mitre_attack_url = "https://attack.mitre.org/techniques/T1098/"
+        $principal_ip = array_distinct($admin.principal.ip)
+        $principal_ip_country = array_distinct($admin.principal.ip_geo_artifact.location.country_or_region)
+        $security_result_description = array_distinct($admin.security_result.description)
+        $security_result_summary = array_distinct($admin.security_result.summary)
+        $metadata_event_type = array_distinct($admin.metadata.event_type)
+        $metadata_product_name = array_distinct($admin.metadata.product_name)
+        $target_application = array_distinct($admin.target.application)
+        $target_resource_attribute_roles_name = array_distinct($admin.target.resource.attribute.roles.name)
+        $target_resource_resource_type = array_distinct($admin.target.resource.resource_type)
+        $target_user_email_addresses = array_distinct($admin.target.user.email_addresses)
+        $security_result_about_email = array_distinct($admin.security_result.about.email)
+        $extracted_fields_events_0_parameters_1_value = array_distinct($admin.extracted.fields["events[0].parameters[1].value"])
+
+    condition:
+        $admin
+}

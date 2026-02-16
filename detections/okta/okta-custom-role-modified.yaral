@@ -1,0 +1,74 @@
+
+rule okta_custom_role_modified {
+
+    meta:
+        author = "Sakil Khan"
+        description = "Detects modifications to admin roles within Okta, which indicate attempts to change permissions."
+        mitre_attack_tactic = "Privilege Escalation"
+        mitre_attack_technique = "Account Manipulation"
+        mitre_attack_url = "https://attack.mitre.org/techniques/T1098/"
+        type = "Alert"
+        data_source = "Okta"
+        severity = "Medium"
+    events:
+        $role.metadata.vendor_name = "Okta"
+
+        // Bind the event timestamp (epoch seconds) to $timestamp for use in outcome scoring
+        $role.metadata.event_timestamp.seconds = $timestamp
+
+        // Bind the acting user's ID for potential correlation
+        $role.principal.user.userid = $userid
+
+        // Match any role-permission modification event:
+        //   - iam.role.permissions.delete : a permission was removed from a custom role
+        //   - iam.role.permissions.add    : a permission was added to an existing custom role
+        //   - iam.role.permissions.create : a new custom role with permissions was created
+        (
+        $role.metadata.product_event_type = "iam.role.permissions.delete" or
+        $role.metadata.product_event_type = "iam.role.permissions.add" or
+        $role.metadata.product_event_type = "iam.role.permissions.create"
+        )
+
+        // Only consider events where the action was successful
+        $role.extracted.fields["outcome.result"]="SUCCESS"
+
+        // Scope to monitored Okta environments via the reference list %okta_environments
+        // strings.concat coerces the namespace to a string so the "in" operator works
+        strings.concat($role.target.namespace, "") in %okta_environments
+
+    outcome:
+        // --- Dynamic risk scoring ---
+        // Base score of 40, with additive bonuses for suspicious timing:
+        //   +20 if the event occurs on Sunday  (day 01)
+        //   +20 if the event occurs on Saturday (day 07)
+        //   +50 if the event occurs outside business hours (before 08:00 or after 18:00 UTC)
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+        // --- Contextual enrichment fields for alert triage ---
+        // Principal (actor) details
+        $principal_user_email_addresses = array_distinct ($role.principal.user.email_addresses)
+        $principal_ip = array_distinct($role.principal.ip)
+        $principal_ip_country = array_distinct($role.principal.ip_geo_artifact.location.country_or_region)
+        $principal_ip_state = array_distinct($role.principal.ip_geo_artifact.location.state)
+        $principal_ip_city = array_distinct($role.principal.location.city)
+
+        // Client / user-agent details
+        $target_user_agent = array_distinct($role.network.http.user_agent)
+        $client_user_agent_browser = array_distinct($role.extracted.fields["client.userAgent.browser"])
+        $client_user_agent_os = array_distinct($role.extracted.fields["client.userAgent.os"])
+
+        // Security result and debug context for deeper investigation
+        $security_result_description = array_distinct($role.security_result.description)
+        $security_result_summary = array_distinct($role.security_result.summary)
+        $debug_context_data_behaviours = array_distinct($role.extracted.fields["debugContext.debugData.behaviors"])
+        $outcome_result = array_distinct($role.extracted.fields["outcome.result"])
+
+    condition:
+        // Fire on every single qualifying event
+        $role
+}

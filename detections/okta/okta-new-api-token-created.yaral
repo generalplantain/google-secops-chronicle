@@ -1,0 +1,43 @@
+rule okta_new_api_token_created {
+
+  meta:
+    author = "Sakil Khan"
+    description = "Detects when a new API token is created."
+    mitre_attack_tactic = "Defense Evasion, Persistence, Privilege Escalation, Initial Access"
+    mitre_attack_technique = "Valid Accounts"
+    type = "Alert"
+    data_source = "Okta"
+    severity = "Medium"
+    false_positives = "This rule may cause false positives if tokens are created for legitimate use cases."
+  events:
+    $token.metadata.vendor_name = "Okta"
+    $token.metadata.product_event_type = "system.api_token.create"
+    $token.metadata.event_timestamp.seconds = $timestamp
+    $token.principal.user.userid = $userid
+
+  outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+    $principal_user_email_addresses = array_distinct ($token.principal.user.email_addresses)
+    $mitre_attack_tactic = "Defense Evasion, Persistence, Privilege Escalation, Initial Access"
+    $mitre_attack_technique = "Valid Accounts"
+    $target_user_agent = array_distinct($token.network.http.user_agent)
+    $client_user_agent_browser = array_distinct($token.extracted.fields["client.userAgent.browser"])
+    $client_user_agent_os = array_distinct($token.extracted.fields["client.userAgent.os"])
+    $principal_ip = array_distinct($token.principal.ip)
+    $principal_ip_country = array_distinct($token.principal.ip_geo_artifact.location.country_or_region)
+    $principal_ip_state = array_distinct($token.principal.ip_geo_artifact.location.state)
+    $principal_ip_city = array_distinct($token.principal.location.city)
+    $security_result_description = array_distinct($token.security_result.description)
+    $security_result_summary = array_distinct($token.security_result.summary)
+    $debug_context_data_behaviours = array_distinct($token.extracted.fields["debugContext.debugData.behaviors"])
+    $outcome_result = array_distinct($token.extracted.fields["outcome.result"])
+
+  condition:
+    $token
+}

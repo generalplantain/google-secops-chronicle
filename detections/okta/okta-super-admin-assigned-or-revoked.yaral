@@ -1,0 +1,47 @@
+rule okta_super_admin_assigned_or_revoked {
+
+  meta:
+    author = "Kate Morley"
+    description = "Searches for logs where an Okta account is assigned or revoke the Super Administrator Role in Okta which is a critical privilege escalation indicator"
+    severity = "Medium"
+    mitre_attack_tactic = "Privilege Escalation"
+    mitre_attack_technique = "Account Manipulation"
+    type= "alert"
+    data_source = "Okta"
+
+events:
+    $admin.metadata.vendor_name= "Okta"
+    ($admin.extracted.fields["eventType"] = "user.account.privilege.revoke" OR $admin.extracted.fields["eventType"] = "user.account.privilege.grant")
+    $admin.extracted.fields["debugContext.debugData.privilegeRevoked"]= /Super administrator/ OR $admin.target.user.attribute.roles.name = "Super administrator"
+    $admin.extracted.fields["actor.type"] = "User"
+    $admin.extracted.fields["outcome.result"] = "SUCCESS"
+    $admin.principal.user.userid = $userid
+    $admin.metadata.event_timestamp.seconds = $timestamp
+
+match:
+    $userid over 1h
+
+outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+    $principal_user_email_addresses = array_distinct ($admin.principal.user.email_addresses)
+    $target_user_agent = array_distinct($admin.network.http.user_agent)
+    $client_user_agent_browser = array_distinct($admin.extracted.fields["client.userAgent.browser"])
+    $client_user_agent_os = array_distinct($admin.extracted.fields["client.userAgent.os"])
+    $principal_ip = array_distinct($admin.principal.ip)
+    $principal_ip_country = array_distinct($admin.principal.ip_geo_artifact.location.country_or_region)
+    $principal_ip_state = array_distinct($admin.principal.ip_geo_artifact.location.state)
+    $principal_ip_city = array_distinct($admin.principal.location.city)
+    $security_result_description = array_distinct($admin.security_result.description)
+    $security_result_summary = array_distinct($admin.security_result.summary)
+    $debug_context_data_behaviours = array_distinct($admin.extracted.fields["debugContext.debugData.behaviors"])
+    $target_user = array_distinct($admin.target.user.userid)
+
+  condition:
+    $admin
+}

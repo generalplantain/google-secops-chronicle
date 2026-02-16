@@ -1,0 +1,64 @@
+rule okta_administrator_privileges_assigned_to_an_okta_group {
+
+    meta:
+        author = "Sakil Khan"
+        description = "Detects when an administrator role is assigned to an Okta group. An adversary may attempt to assign administrator privileges to an Okta group in order to assign additional permissions to compromised user accounts and maintain access to their target."
+        type = "Alert"
+        data_source = "Okta"
+        severity = "Medium"
+        false_positives = "This rule may cause false positives if admin privileges are assigned for legitimate use cases."
+
+    events:
+        $admin.metadata.vendor_name = "Okta"
+
+        // "group.privilege.grant" fires when an admin role is assigned to a group, effectively giving every member of that group elevated permissions
+        $admin.metadata.product_event_type = "group.privilege.grant"
+
+        // Bind timestamp for use in off-hours / weekend risk scoring below
+        $admin.metadata.event_timestamp.seconds = $timestamp
+
+        // Bind the actor's display name so we can correlate repeated grants by the same person in the match window
+        $admin.extracted.fields["actor.displayName"] = $userid
+
+    match:
+        // Correlate by the actor who performed the privilege grant over a 1-hour window;
+        $userid over 1h
+
+    outcome:
+        // --- Dynamic risk scoring ---
+        // Base: 10  |  Weekend: +20  |  Off-hours: +20
+        // Proxy detected (3 field variants): up to +30
+        // Outside UK: +10  |  Outside US: +10
+        // Theoretical max: 110
+
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+        // --- Contextual enrichment for triage ---
+        $target_user_agent = array_distinct($admin.network.http.user_agent)
+        $client_user_agent_browser = array_distinct($admin.extracted.fields["client.userAgent.browser"])
+        $client_user_agent_os = array_distinct($admin.extracted.fields["client.userAgent.os"])
+        $principal_ip = array_distinct($admin.principal.ip)
+        $principal_ip_country = array_distinct($admin.principal.ip_geo_artifact.location.country_or_region)
+        $principal_ip_state = array_distinct($admin.principal.ip_geo_artifact.location.state)
+        $principal_ip_city = array_distinct($admin.principal.location.city)
+        $security_result_description = array_distinct($admin.security_result.description)
+        $security_result_summary = array_distinct($admin.security_result.summary)
+
+        // Okta behavioral signals (e.g. "New Device", "New IP", "Velocity")
+        $debug_context_data_behaviours = array_distinct($admin.extracted.fields["debugContext.debugData.behaviors"])
+
+        // The specific admin role(s) that were granted — key for determining blast radius
+        $privilege_granted = array_distinct($admin.extracted.fields["debugContext.debugData.privilegeGranted"])
+
+        // Use array() (not array_distinct) to preserve duplicates — shows if the same group received multiple privilege grants within the match window
+        $target_users = array($admin.extracted.fields["target[0].displayName"])
+
+    condition:
+        // Alert on any privilege grant event within the match window
+        $admin
+}

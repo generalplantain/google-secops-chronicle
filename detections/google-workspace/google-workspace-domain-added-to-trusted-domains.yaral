@@ -1,0 +1,40 @@
+rule google_workspace_domain_added_to_trusted_domains {
+
+    meta:
+        author = "Sakil Khan"
+        description = "Detects when a domain is added to the list of trusted Google Workspace domains. An adversary may add a trusted domain in order to collect and exfiltrate data with less restrictive security controls."
+        mitre_attack_tactic = "Defense Evasion"
+        mitre_attack_technique = "Impair Defenses"
+        mitre_attack_url = "https://attack.mitre.org/techniques/T1562/"
+        type = "Alert"
+        data_source = "Google Workspace"
+        severity = "Medium"
+    events:
+        $domain.metadata.vendor_name = "Google Workspace"
+        $domain.metadata.event_timestamp.seconds = $timestamp
+        $domain.metadata.product_event_type = "ADD_TRUSTED_DOMAINS"
+        $domain.principal.user.userid = $userid
+
+    outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+        // Contextual enrichment for alert triage
+
+        $principal_user_email_addresses = array_distinct ($domain.principal.user.email_addresses)
+        $mitre_attack_tactic = "Defense Evasion"
+        $mitre_attack_technique = "Impair Defenses"
+        $mitre_attack_url = "https://attack.mitre.org/techniques/T1562/"
+        $principal_ip = array_distinct($domain.principal.ip)
+        $principal_ip_country = array_distinct($domain.principal.ip_geo_artifact.location.country_or_region)
+        $principal_ip_state = array_distinct($domain.principal.ip_geo_artifact.location.state)
+        $principal_ip_city = array_distinct($domain.principal.location.city)
+        $principal_display_name = array_distinct($domain.principal.user.user_display_name)
+
+    condition:
+        $domain
+}

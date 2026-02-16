@@ -1,0 +1,48 @@
+rule google_workspace_domain_wide_delegation_granted {
+
+    meta:
+        author = "Sakil Khan"
+        description = "Detects when a domain-wide delegation of authority is granted to a service account. Domain-wide delegation can be configured to grant third-party and internal applications to access the data of Google Workspace users. An adversary may configure domain-wide delegation to maintain access to their target's data."
+        mitre_attack_tactic = "Persistence"
+        mitre_attack_technique = "Account manipulation"
+        type = "Alert"
+        data_source = "Google Workspace"
+        severity = "High"
+    events:
+        $api.metadata.vendor_name = "Google Workspace"
+        $api.metadata.product_name = "admin"
+        $api.metadata.product_event_type = "AUTHORIZE_API_CLIENT_ACCESS"
+        $api.metadata.event_timestamp.seconds = $timestamp
+        $api.principal.user.user_display_name = $userid
+
+    match:
+       $userid over 1h
+
+    outcome:
+        // Risk scoring — base: 55 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            55 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+        // Contextual enrichment for alert triage
+
+        $principal_user_email_addresses = array_distinct ($api.principal.user.email_addresses)
+        $principal_ip = array_distinct($api.principal.ip)
+        $principal_ip_country = array_distinct($api.principal.ip_geo_artifact.location.country_or_region)
+        $principal_ip_state = array_distinct($api.principal.ip_geo_artifact.location.state)
+        $principal_ip_city = array_distinct($api.principal.location.city)
+        $security_result_description = array_distinct($api.security_result.description)
+        $security_result_summary = array_distinct($api.security_result.summary)
+        $target_application = array_distinct($api.target.application)
+        $target_resource_resource_type = array_distinct($api.target.resource.resource_type)
+        $principal_user_attribute_labels_value = array_distinct($api.principal.user.attribute.labels.value)
+        $security_result_category_details = array_distinct($api.security_result.category_details)
+        $target_domain_name = array_distinct($api.target.domain.name)
+        $target_user_attribute_labels_value = array_distinct($api.target.user.attribute.labels.value)
+        $target_user_userid = array_distinct($api.target.user.userid)
+
+    condition:
+        $api
+}

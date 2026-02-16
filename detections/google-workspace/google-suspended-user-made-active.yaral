@@ -1,0 +1,43 @@
+rule google_suspended_user_made_active {
+
+    meta:
+        author = "Sakil Khan"
+        description = "This rule detects when a suspended user account in Google Workspace is reactivated. While this can be a legitimate administrative action, it is also a security risk, as an attacker could reactivate a dormant account to gain persistent access to the network."
+        mitre_attack_tactic = "Initial Access"
+        mitre_attack_technique = "Valid Accounts"
+        mitre_attack_url = "https://attack.mitre.org/techniques/T1078/"
+        type= "alert"
+        data_source = "Google Workspace"
+        severity = "Low"
+
+    events:
+        $suspend.metadata.vendor_name = "Google Workspace"
+        $suspend.metadata.product_event_type = "UNSUSPEND_USER" // This is the key condition, triggering only when a user is unsuspended (made active).
+        $suspend.metadata.event_timestamp.seconds = $timestamp
+        $suspend.principal.user.email_addresses = $userid // Assigns the administrator's email address to the '$userid' placeholder variable.
+
+    match:
+       $userid over 1h // Groups alerts by the administrator ('$userid') who performed the action over a 1-hour window.
+
+    outcome:
+        // Risk scoring — base: 20 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            20 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+        // The 'array_distinct' function gathers all unique values for the specified field from the events that matched within the time window.
+        $principal_country = array_distinct($suspend.principal.location.country_or_region) // Captures the country of the administrator who performed the action.
+        $principal_state = array_distinct($suspend.principal.location.state) // Captures the state of the administrator who performed the action.
+        // Contextual enrichment for alert triage
+
+        $principal_ip = array_distinct($suspend.principal.ip) // Captures the IP address of the administrator.
+        $security_result_detection = array_distinct($suspend.security_result.detection_fields.value) // Collects any other security detections associated with this event.
+        $target_user = array_distinct($suspend.target.user.email_addresses) // Captures the email address of the account that was unsuspended.
+        $admin = array_distinct($suspend.principal.user.email_addresses) // Captures the email address of the administrator who performed the action.
+
+    condition:
+        $suspend // The condition for the rule to fire is the existence of the '$suspend' event variable defined above.
+
+}

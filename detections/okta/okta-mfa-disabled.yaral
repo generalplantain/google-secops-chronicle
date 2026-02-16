@@ -1,0 +1,43 @@
+rule okta_mfa_disabled {
+
+    meta:
+        author = "Sakil Khan"
+        description = "Detects when multi-factor authentication is disabled, potentially indicating an attempt to bypass authentication."
+        mitre_attack_tactic = "Credential Access"
+        mitre_attack_technique = "Valid Accounts"
+        mitre_attack_url = "https://attack.mitre.org/techniques/T1078/"
+        type = "Alert"
+        data_source = "Okta"
+        severity = "Medium"
+        false_positives = "This rule may cause false positives if tokens are created for legitimate use cases."
+    events:
+        $mfa.metadata.vendor_name = "Okta"
+        $mfa.metadata.product_event_type = "user.mfa.factor.deactivate" or $mfa.metadata.product_event_type = "user.mfa.factor.reset_all"
+        $mfa.metadata.event_timestamp.seconds = $timestamp
+        $mfa.target.user.user_display_name = $userResetted
+        $mfa.extracted.fields["actor.displayName"] = $displayName
+        $mfa.extracted.fields["outcome.result"] = "SUCCESS"
+    match:
+         $userResetted, $displayName over 1h
+
+    outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+        $target_user_agent = array_distinct($mfa.network.http.user_agent)
+        $client_user_agent_browser = array_distinct($mfa.extracted.fields["client.userAgent.browser"])
+        $client_user_agent_os = array_distinct($mfa.extracted.fields["client.userAgent.os"])
+        $dc_principal_ip = count_distinct($mfa.principal.ip)
+        $principal_ip_country = array_distinct($mfa.principal.ip_geo_artifact.location.country_or_region)
+        $principal_ip_city = array_distinct($mfa.principal.location.city)
+        $security_result_description = array_distinct($mfa.security_result.description)
+        $debug_context_data_behaviours = array_distinct($mfa.extracted.fields["debugContext.debugData.behaviors"])
+        $outcome_result = array_distinct($mfa.extracted.fields["outcome.reason"])
+
+    condition:
+        $mfa and $risk_score > 40
+}

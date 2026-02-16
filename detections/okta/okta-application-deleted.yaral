@@ -1,0 +1,51 @@
+rule okta_application_deleted {
+
+  meta:
+    author = "Community"
+    description = "An Okta application has been deleted or deactivated by a user. An adversary may attempt to modify,deactivate, or delete an Okta application in order to weaken an organization's security controls or disrupt their business operations."
+    severity = "Medium"
+    mitre_attack_tactic = "Impact"
+    mitre_attack_technique = "Service Stop"
+    data_source= "Okta"
+
+  events:
+    $application.metadata.log_type  = "OKTA"
+    (
+      $application.extracted.fields["eventType"] = "application.lifecycle.delete"
+      OR $application.extracted.fields["eventType"] = "application.lifecycle.deactivate"
+    )
+    $application.extracted.fields["actor.type"] = "User"
+    $application.extracted.fields["outcome.result"] = "SUCCESS"
+    $application.principal.user.userid = $userid
+    $application.metadata.event_timestamp.seconds = $timestamp
+    $application.target.application = $application_name
+
+    match:
+         $userid, $application_name over 1h
+
+  outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+    $principal_user_email_addresses = array_distinct ($application.principal.user.email_addresses)
+    $target_user_agent = array_distinct($application.network.http.user_agent)
+    $client_user_agent_browser = array_distinct($application.extracted.fields["client.userAgent.browser"])
+    $client_user_agent_os = array_distinct($application.extracted.fields["client.userAgent.os"])
+    $principal_ip = array_distinct($application.principal.ip)
+    $principal_ip_country = array_distinct($application.principal.ip_geo_artifact.location.country_or_region)
+    $principal_ip_state = array_distinct($application.principal.ip_geo_artifact.location.state)
+    $principal_ip_city = array_distinct($application.principal.location.city)
+    $security_result_description = array_distinct($application.security_result.description)
+    $security_result_summary = array_distinct($application.security_result.summary)
+    $debug_context_data_behaviours = array_distinct($application.extracted.fields["debugContext.debugData.behaviors"])
+    $target_app_name = array_distinct($application.extracted.fields["target[0].displayName"])
+    $app = array_distinct($application.extracted.fields["target[0].alternateId"])
+    $target_application = array_distinct($application.target.application)
+
+  condition:
+    $application
+}

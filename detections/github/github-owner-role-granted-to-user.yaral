@@ -1,0 +1,55 @@
+rule github_owner_role_granted_to_user {
+  meta:
+    author = "Sakil Khan"
+    description = "Detects when a member is granted org owner/admin privileges in GitHub"
+    mitre_attack_tactic = "Persistence"
+    mitre_attack_technique = "Account Manipulation"
+    mitre_attack_url = "https://attack.mitre.org/techniques/T1098/"
+    type = "Alert"
+    data_source = "GITHUB"
+    severity = "Medium"
+  events:
+    // What we're looking for: GitHub audit logs where someone gets promoted to admin
+    $owner.metadata.log_type = "GITHUB"
+    $owner.metadata.event_timestamp.seconds = $timestamp
+    $owner.metadata.product_event_type = "org.update_member"
+    $owner.additional.fields["permission"] = "admin"
+    $owner.principal.user.email_addresses = $userid
+
+  match:
+    // Group alerts by the person doing the promotion (not the person being promoted)
+    // Fires once per hour even if they promote multiple people
+    $userid over 1h
+
+  outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+        (timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8)
+        or timestamp.get_hour($timestamp, "UTC") > 18,
+        20
+      )
+    )
+
+    // Who got promoted to admin
+    $target_user = array_distinct($owner.additional.fields["Destination_User"])
+    $target_user_displayname = array_distinct($owner.target.user.user_display_name)
+
+    // Who did the promoting
+    $source_user = array_distinct($owner.additional.fields["Source_User"])
+
+    // Where they were when they did it
+    // Contextual enrichment for alert triage
+
+    $principal_ip_country = array_distinct($owner.principal.location.country_or_region)
+
+    // What permission they had before (member, etc)
+    $old_permission = array_distinct($owner.additional.fields["old_permission"])
+
+  condition:
+    $owner
+}

@@ -1,0 +1,52 @@
+rule github_repository_deleted {
+
+  meta:
+    author = "Sakil Khan"
+    description = "Detects when a GitHub repository is deleted (repo.destroy). Repo deletions can be destructive and may indicate compromise or unauthorized impact."
+    mitre_attack_tactic = "Impact"
+    mitre_attack_technique = "Data Destruction"
+    mitre_attack_url = "https://attack.mitre.org/techniques/T1485/"
+    type = "Alert"
+    data_source = "GITHUB"
+    severity = "Medium"
+  events:
+    // What we're looking for: GitHub audit logs showing a repository delete action
+    $delete.metadata.log_type = "GITHUB"
+    $delete.metadata.event_timestamp.seconds = $timestamp
+    $delete.metadata.product_event_type = "repo.destroy"
+
+    // Grouping key: user id of the person who performed the deletion
+    $delete.principal.user.userid = $userid
+
+	match:
+	  // Group alerts by the person doing the deletion
+		$userid over 1h
+
+  outcome:
+        // Risk scoring — base: 40 | weekend: +15 | off-hours: +15
+        $risk_score = max(
+            40 +
+            if (01 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Sunday
+            if (07 = timestamp.get_day_of_week($timestamp, "UTC"), 15) + // Saturday
+            if ((timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8) or timestamp.get_hour($timestamp, "UTC") > 18, 15) // Off-hours (before 08:00 or after 18:00 UTC)
+        )
+        (timestamp.get_hour($timestamp, "UTC") >= 0 and timestamp.get_hour($timestamp, "UTC") <= 8)
+        or timestamp.get_hour($timestamp, "UTC") > 18,
+        20
+      )
+    )
+
+    // Who performed the deletion (actor)
+    $principal_user_id = array_distinct($delete.principal.user.email_addresses)
+
+    // Repo details
+    $repo_name = array_distinct($delete.target.resource.name)
+    $repo_org = array_distinct($delete.additional.fields["business"])
+    $repo_id = array_distinct($delete.additional.fields["repo_id"])
+
+    // Geo / client context GitHub logs sometimes have country + user agent, but not always IP)
+    $principal_ip_country = array_distinct($delete.principal.location.country_or_region)
+
+  condition:
+    $delete
+}
