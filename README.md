@@ -11,28 +11,6 @@ A community collection of **38 YARA-L detection rules** for [Google Security Ope
 | [GitHub](detections/github/) | 4 | Mass repo cloning, repo deletion, owner role grants, app installations |
 | [1Password](detections/1password/) | 3 | Login without MFA, brute force attempts, SCIM bridge failures |
 
-## Getting Started
-
-### Prerequisites
-
-- A Google SecOps (Chronicle) instance with log ingestion configured for the relevant data sources
-- Appropriate permissions to create detection rules
-
-### Installation
-
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/generalplantain/google-secops-chronicle.git
-   ```
-
-2. Copy the `.yaral` files for your data sources into your Google SecOps detection engine, either through the UI or the [Detection Engine API](https://cloud.google.com/chronicle/docs/reference/detection-engine-api).
-
-3. **Customise before deploying** — several rules contain placeholders you should update:
-   - `/@yourdomain\.com$/` — replace with your organisation's email domain(s)
-   - `%vip_users` — create a reference list with your VIP/executive user identifiers
-   - `breakglass-account@example.com` — replace with your actual breakglass account
-   - `%okta_environments` — create a reference list with your Okta tenant namespace(s)
-
 ## Rule Structure
 
 Each rule follows a consistent structure:
@@ -83,15 +61,6 @@ detections/
   google-workspace/   # Google Workspace & Gmail detection rules
   okta/               # Okta identity detection rules
 ```
-
-## Contributing
-
-Contributions are welcome! When submitting a new rule, please ensure it:
-- Follows the YARA-L structure above
-- Includes a `meta` block with author, description, MITRE mapping, severity, and data source
-- Uses the standardised risk scoring model
-- Contains inline comments explaining the detection logic
-- Has no organisation-specific references (email domains, tenant names, internal URLs)
 
 ## License
 
