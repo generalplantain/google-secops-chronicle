@@ -1,6 +1,6 @@
 # Google SecOps (Chronicle) Detection Rules
 
-A community collection of **38 YARA-L detection rules** for [Google Security Operations (Chronicle)](https://cloud.google.com/security/products/security-operations). These rules provide coverage across identity, email, collaboration, and source code management platforms.
+A community collection of **38 YARA-L detection rules** for [Google Security Operations (Chronicle)](https://cloud.google.com/security/products/security-operations). 
 
 ## Data Sources
 
